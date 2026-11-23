@@ -1,6 +1,6 @@
 # Hooks for prek (https://github.com/j178/prek).
 # Install with `prek install`; run manually with `prek run --all-files`.
-exclude = "^(ome-zarr/|target/|tests/fixtures/generated/)"
+exclude = "^(ome-zarr/|target/|tests/fixtures/generated/|oztest/)"
 default_install_hook_types = ["pre-commit", "pre-push"]
 default_stages = ["pre-commit"]
 
