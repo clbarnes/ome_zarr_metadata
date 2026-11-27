@@ -28,7 +28,7 @@ impl<'de> Deserialize<'de> for Matrix {
         D: serde::Deserializer<'de>,
     {
         let vec_of_vecs: Vec<Vec<f64>> = Vec::deserialize(deserializer)?;
-        Self::from_vecs(&vec_of_vecs).map_err(serde::de::Error::custom)
+        Self::from_slices(&vec_of_vecs).map_err(serde::de::Error::custom)
     }
 }
 
@@ -60,9 +60,9 @@ impl Matrix {
         self.cols
     }
 
-    fn from_vecs(vecs: &[Vec<f64>]) -> crate::Result<Self> {
+    fn from_slices(vecs: &[impl AsRef<[f64]>]) -> crate::Result<Self> {
         let rows = vecs.len();
-        let mut viter = vecs.iter();
+        let mut viter = vecs.iter().map(|v| v.as_ref());
         let Some(first) = viter.next() else {
             return Err(crate::Error::InvalidMatrix {
                 numel: 0,
