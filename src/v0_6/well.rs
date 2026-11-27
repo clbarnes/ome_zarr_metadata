@@ -5,7 +5,7 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
-use validatrix::Validate;
+use validatrix::{DiagnosticError, Level, Validate};
 
 use crate::v0_5 as prev;
 
@@ -18,16 +18,21 @@ pub struct Well {
 }
 
 impl Validate for Well {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
-        accum.validate_iter_at("images", &self.images);
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_iter_at("images", &self.images)?;
         let mut paths = BTreeSet::new();
         for (idx, p) in self.images.iter().map(|i| &i.path).enumerate() {
             if !paths.insert(p) {
                 accum.with_keys(&["images".into(), idx.into(), "path".into()], |a| {
-                    a.add_failure(format!("duplicate path '{}'", p.display()));
-                });
+                    a.diagnose(
+                        Level::Error,
+                        format_args!("duplicate path '{}'", p.display()),
+                    )?;
+                    Ok(())
+                })?;
             }
         }
+        Ok(())
     }
 }
 
@@ -47,27 +52,32 @@ pub struct WellImage {
 }
 
 impl Validate for WellImage {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
         let Some(s) = self.path.as_os_str().to_str() else {
-            accum.add_failure_at("path", "path is not valid UTF-8");
-            return;
+            accum.diagnose_at("path", Level::Error, "path is not valid UTF-8")?;
+            return Ok(());
         };
         if s.is_empty() {
-            accum.add_failure_at("path", "path is empty");
+            accum.diagnose_at("path", Level::Error, "path is empty")?;
         }
         if s == "." || s == ".." {
-            accum.add_failure_at("path", "path cannot be '.' or '..'");
-            return;
+            accum.diagnose_at("path", Level::Error, "path cannot be '.' or '..'")?;
+            return Ok(());
         }
         if s.starts_with("__") {
-            accum.add_failure_at("path", "path cannot start with '__'");
+            accum.diagnose_at("path", Level::Error, "path cannot start with '__'")?;
         }
         for c in s.chars() {
             if !c.is_alphanumeric() && c != '-' && c != '_' && c != '.' {
-                accum.add_failure_at("path", format!("path contains invalid character '{c}'"));
+                accum.diagnose_at(
+                    "path",
+                    Level::Error,
+                    format_args!("path contains invalid character '{c}'"),
+                )?;
                 break;
             }
         }
+        Ok(())
     }
 }
 

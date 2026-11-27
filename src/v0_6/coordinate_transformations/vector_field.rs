@@ -1,7 +1,7 @@
 //! Vector field transformations: coordinates and displacements.
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use super::TransformType;
 
@@ -35,10 +35,11 @@ pub struct FieldTransform {
 }
 
 impl Validate for FieldTransform {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if self.path.is_empty() {
-            accum.add_failure_at("path", "empty");
+            accum.diagnose_at("path", Level::Error, "empty")?;
         }
+        Ok(())
     }
 }
 
@@ -69,9 +70,10 @@ macro_rules! field_transform_newtype {
         }
 
         impl Validate for $name {
-            fn validate_inner(&self, accum: &mut Accumulator) {
-                self.0.validate_inner(accum);
-            }
+            fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+                self.0.validate_inner(accum)?;
+    Ok(())
+}
         }
 
         impl TransformType for $name {

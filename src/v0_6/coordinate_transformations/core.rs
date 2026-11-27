@@ -1,7 +1,7 @@
 //! Core transformations: identity, scale, and translation.
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use super::TransformType;
 use crate::{util::ValidNum, v0_5 as prev};
@@ -11,7 +11,9 @@ use crate::{util::ValidNum, v0_5 as prev};
 pub struct Identity;
 
 impl Validate for Identity {
-    fn validate_inner(&self, _accum: &mut Accumulator) {}
+    fn validate_inner(&self, _accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        Ok(())
+    }
 }
 
 impl TransformType for Identity {
@@ -45,15 +47,17 @@ impl TryFrom<prev::CoordinateTransformTranslation> for Translation {
 }
 
 impl Validate for Translation {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if self.translation.is_empty() {
-            accum.add_failure_at("translation", "empty");
+            accum.diagnose_at("translation", Level::Error, "empty")?;
         }
         accum.with_key("translation", |a| {
             for (i, &v) in self.translation.iter().enumerate() {
-                a.validate_member_at(i, &ValidNum(v));
+                a.validate_member_at(i, &ValidNum(v))?;
             }
-        });
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 
@@ -90,15 +94,17 @@ impl TryFrom<prev::CoordinateTransformScale> for Scale {
 }
 
 impl Validate for Scale {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if self.scale.is_empty() {
-            accum.add_failure_at("scale", "empty");
+            accum.diagnose_at("scale", Level::Error, "empty")?;
         }
         accum.with_key("scale", |a| {
             for (i, &v) in self.scale.iter().enumerate() {
-                a.validate_member_at(i, &ValidNum(v));
+                a.validate_member_at(i, &ValidNum(v))?;
             }
-        });
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 

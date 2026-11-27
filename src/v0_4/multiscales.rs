@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use crate::{MaybeNDim, NDim, ndim::validate_ndims, v0_4::AxisType};
 
@@ -37,36 +37,47 @@ pub struct MultiscaleImage {
 }
 
 impl Validate for MultiscaleImage {
-    fn validate_inner(&self, accum: &mut Accumulator) {
-        accum.with_key("axes", |a| valid_axes(a, &self.axes));
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        accum.with_key("axes", |a| valid_axes(a, &self.axes))?;
 
         accum.with_key("datasets", |a| {
-            valid_datasets(a, self.maybe_ndim(), &self.datasets);
-        });
+            valid_datasets(a, self.maybe_ndim(), &self.datasets)?;
+            Ok(())
+        })?;
 
         if let Some(ct) = self.coordinate_transformations.as_ref() {
             accum.with_key("coordinateTransformations", |a| {
-                valid_transforms(a, self.maybe_ndim(), ct);
-            });
+                valid_transforms(a, self.maybe_ndim(), ct)?;
+                Ok(())
+            })?;
         }
+        Ok(())
     }
 }
 
-fn unique_axis_names(accum: &mut Accumulator, axes: &[Axis]) {
+fn unique_axis_names(accum: &mut Accumulator, axes: &[Axis]) -> Result<(), DiagnosticError> {
     let mut names = BTreeSet::default();
     for (idx, a) in axes.iter().enumerate() {
         if !names.insert(a.name.as_str()) {
-            accum.add_failure_at(idx, format!("duplicate axis name '{}'", a.name));
+            accum.diagnose_at(
+                idx,
+                Level::Error,
+                format_args!("duplicate axis name '{}'", a.name),
+            )?;
         }
     }
+    Ok(())
 }
 
 /// ?time, ?channel/custom/null, ?space, space, space
-pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) {
-    accum.validate_iter(axes);
-    unique_axis_names(accum, axes);
+pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) -> Result<(), DiagnosticError> {
+    accum.validate_iter(axes)?;
+    unique_axis_names(accum, axes)?;
     if axes.len() < 2 || axes.len() > 5 {
-        accum.add_failure(format!("got {} axes, expected 2-5", axes.len()));
+        accum.diagnose(
+            Level::Error,
+            format_args!("got {} axes, expected 2-5", axes.len()),
+        )?;
     }
 
     let mut done_time = false;
@@ -78,23 +89,28 @@ pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) {
             Some(AxisType::Space) => {
                 n_space += 1;
                 if n_space > 3 {
-                    accum.add_failure_at(
+                    accum.diagnose_at(
                         idx,
-                        format!("at least {n_space} space axes, should be max 3"),
-                    );
+                        Level::Error,
+                        format_args!("at least {n_space} space axes, should be max 3"),
+                    )?;
                 }
                 done_time |= true;
                 done_channel_custom |= true;
             }
             Some(AxisType::Time) => {
                 if done_time || done_channel_custom || n_space > 0 {
-                    accum.add_failure_at(idx, "unexpected time axis");
+                    accum.diagnose_at(idx, Level::Error, "unexpected time axis")?;
                 }
                 done_time |= true;
             }
             None | Some(AxisType::Channel) | Some(AxisType::Custom(_)) => {
                 if done_channel_custom || n_space > 0 {
-                    accum.add_failure_at(idx, "unexpected channel/custom/unknown axis");
+                    accum.diagnose_at(
+                        idx,
+                        Level::Error,
+                        "unexpected channel/custom/unknown axis",
+                    )?;
                 }
                 done_channel_custom |= true;
                 done_time |= true;
@@ -102,61 +118,75 @@ pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) {
         }
     }
     if n_space < 2 {
-        accum.add_failure(format!("got {n_space} space axes, expected 2-3"));
+        accum.diagnose(
+            Level::Error,
+            format_args!("got {n_space} space axes, expected 2-3"),
+        )?;
     }
+    Ok(())
 }
 
 pub(crate) fn valid_datasets(
     accum: &mut Accumulator,
     expected_ndim: Option<usize>,
     dss: &[MultiscaleImageDataset],
-) {
+) -> Result<(), DiagnosticError> {
     if dss.is_empty() {
-        accum.add_failure("empty multiscale datasets");
-        return;
+        accum.diagnose(Level::Error, "empty multiscale datasets")?;
+        return Ok(());
     }
-    validate_ndims(accum, expected_ndim, dss.iter());
-    accum.validate_iter(dss);
+    validate_ndims(accum, expected_ndim, dss.iter())?;
+    accum.validate_iter(dss)?;
+    Ok(())
 }
 
 pub(crate) fn valid_transforms(
     accum: &mut Accumulator,
     expected_ndim: Option<usize>,
     cts: &[CoordinateTransform],
-) {
+) -> Result<(), DiagnosticError> {
     // todo: validate that channel axes' scales=1 and translation=0
-    validate_ndims(accum, expected_ndim, cts.iter());
-    accum.validate_iter(cts);
+    validate_ndims(accum, expected_ndim, cts.iter())?;
+    accum.validate_iter(cts)?;
     let mut has_scale = false;
     let mut has_translation = false;
     for (idx, ct) in cts.iter().enumerate() {
         match ct {
             CoordinateTransform::Identity => {
-                accum.add_failure_at(idx, "identity transform cannot be used here");
+                accum.diagnose_at(idx, Level::Error, "identity transform cannot be used here")?;
             }
             CoordinateTransform::Translation(_t) => {
                 if !has_scale {
-                    accum.add_failure_at(idx, "translation before scale transformation");
+                    accum.diagnose_at(
+                        idx,
+                        Level::Error,
+                        "translation before scale transformation",
+                    )?;
                 }
                 if has_translation {
-                    accum.add_failure_at(idx, "multiple translation transformations");
+                    accum.diagnose_at(idx, Level::Error, "multiple translation transformations")?;
                 }
                 has_translation |= true;
             }
             CoordinateTransform::Scale(_s) => {
                 if has_scale {
-                    accum.add_failure_at(idx, "multiple scale transformations");
+                    accum.diagnose_at(idx, Level::Error, "multiple scale transformations")?;
                 }
                 if has_translation {
-                    accum.add_failure_at(idx, "scale after translation transformation");
+                    accum.diagnose_at(
+                        idx,
+                        Level::Error,
+                        "scale after translation transformation",
+                    )?;
                 }
                 has_scale |= true;
             }
         }
     }
     if !has_scale {
-        accum.add_failure("no scale transformation");
+        accum.diagnose(Level::Error, "no scale transformation")?;
     }
+    Ok(())
 }
 
 impl NDim for &MultiscaleImage {
@@ -176,10 +206,11 @@ pub struct MultiscaleImageDataset {
 }
 
 impl Validate for MultiscaleImageDataset {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         accum.with_key("coordinateTransformations", |a| {
             valid_transforms(a, None, &self.coordinate_transformations)
-        });
+        })?;
+        Ok(())
     }
 }
 

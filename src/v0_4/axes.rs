@@ -3,7 +3,7 @@
 //! <https://ngff.openmicroscopy.org/0.4/#axes-md>.
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Validate};
 
 /// `axis` element metadata. Represents a dimension (axis) of a physical coordinate space.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -20,9 +20,9 @@ pub struct Axis {
 }
 
 impl Validate for Axis {
-    fn validate_inner(&self, _accum: &mut Accumulator) {
+    fn validate_inner(&self, _accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         let (Some(t), Some(u)) = (&self.r#type, &self.unit) else {
-            return;
+            return Ok(());
         };
         match u {
             AxisUnit::Space(u) => {
@@ -43,6 +43,7 @@ impl Validate for Axis {
             }
             AxisUnit::Custom(_) => (),
         }
+        Ok(())
     }
 }
 

@@ -25,7 +25,7 @@ pep440_rs = "0.7.3"
 serde = { version = "1.0.184", features = ["derive"] }
 serde_json = { version = "1.0.71", features = ["float_roundtrip", "preserve_order"] }
 thiserror = "2.0.16"
-validatrix = { version = "0.3.1", features = ["serde"] }
+validatrix = { version = "0.5" }
 clap = { version = "4.5.57", features = ["derive"], optional = true }
 log = "0.4.35"
 env_logger = { version = "0.11.11", optional = true }

@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use validatrix::Validate;
+use validatrix::{DiagnosticError, Level, Validate};
 
 use super::WellImage;
 
@@ -18,16 +18,21 @@ pub struct Well {
 }
 
 impl Validate for Well {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
-        accum.validate_iter_at("images", &self.images);
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_iter_at("images", &self.images)?;
         let mut paths = BTreeSet::new();
         for (idx, p) in self.images.iter().map(|i| &i.path).enumerate() {
             if !paths.insert(p) {
                 accum.with_keys(&["images".into(), idx.into(), "path".into()], |a| {
-                    a.add_failure(format!("duplicate path '{}'", p.display()));
-                });
+                    a.diagnose(
+                        Level::Error,
+                        format_args!("duplicate path '{}'", p.display()),
+                    )?;
+                    Ok(())
+                })?;
             }
         }
+        Ok(())
     }
 }
 

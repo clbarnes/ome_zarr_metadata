@@ -7,7 +7,7 @@ use crate::v0_4::validate_unique_labels;
 pub use crate::v0_4::{ImageLabelColor, ImageLabelProperties, ImageLabelSource, Labels};
 
 use serde::{Deserialize, Serialize};
-use validatrix::Validate;
+use validatrix::{DiagnosticError, Level, Validate};
 
 /// `image-label` metadata. Stores information about the display colors, source image, and optionally, further arbitrary properties of a label image.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -24,24 +24,26 @@ pub struct ImageLabel {
 }
 
 impl Validate for ImageLabel {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
         if let Some(c) = self.colors.as_ref() {
             accum.with_key("colors", |a| {
                 if c.is_empty() {
-                    a.add_failure("empty");
+                    a.diagnose(Level::Error, "empty")?;
                 }
                 validate_unique_labels(a, c.iter())
-            });
+            })?;
         }
 
         if let Some(p) = self.properties.as_ref() {
             accum.with_key("properties", |a| {
                 if p.is_empty() {
-                    a.add_failure("empty");
+                    a.diagnose(Level::Error, "empty")?;
                 }
-                validate_unique_labels(a, p.iter());
-            });
+                validate_unique_labels(a, p.iter())?;
+                Ok(())
+            })?;
         }
+        Ok(())
     }
 }
 

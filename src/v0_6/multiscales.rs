@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use crate::{Error, MaybeNDim, NDim};
 
@@ -62,25 +62,28 @@ fn check_ndim(
     key: &'static str,
     got: Option<usize>,
     expected: Option<usize>,
-) {
+) -> Result<(), DiagnosticError> {
     if let (Some(g), Some(e)) = (got, expected)
         && g != e
     {
-        accum.add_failure_at(
+        accum.diagnose_at(
             key,
-            format!("dimensionality {g} does not match coordinate system dimensionality {e}"),
-        );
+            Level::Error,
+            format_args!("dimensionality {g} does not match coordinate system dimensionality {e}"),
+        )?;
     }
+    Ok(())
 }
 
 impl Validate for MultiscaleImage {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         accum.with_key("coordinateSystems", |a| {
             if self.coordinate_systems.is_empty() {
-                a.add_failure("empty");
+                a.diagnose(Level::Error, "empty")?;
             }
-            validate_coordinate_systems(a, &self.coordinate_systems);
-        });
+            validate_coordinate_systems(a, &self.coordinate_systems)?;
+            Ok(())
+        })?;
 
         let intrinsic = self
             .intrinsic_coordinate_system()
@@ -89,47 +92,61 @@ impl Validate for MultiscaleImage {
 
         accum.with_key("datasets", |a| {
             if self.datasets.is_empty() {
-                a.add_failure("empty");
+                a.diagnose(Level::Error, "empty")?;
             }
-            a.validate_iter(&self.datasets);
+            a.validate_iter(&self.datasets)?;
             let mut paths = BTreeSet::default();
             for (idx, ds) in self.datasets.iter().enumerate() {
                 if !paths.insert(ds.path.as_str()) {
-                    a.add_failure_at(idx, format!("duplicate path '{}'", ds.path));
+                    a.diagnose_at(
+                        idx,
+                        Level::Error,
+                        format_args!("duplicate path '{}'", ds.path),
+                    )?;
                 }
                 a.with_keys(&[idx.into(), "coordinateTransformations".into()], |a2| {
                     let Some(ct) = ds.transform() else {
-                        return;
+                        return Ok(());
                     };
                     let Some(out) = ds.output_name() else {
-                        return;
+                        return Ok(());
                     };
                     if Some(out) != intrinsic {
-                        a2.add_failure_at(
+                        a2.diagnose_at(
                             0,
+                            Level::Error,
                             "output coordinate system differs from other datasets",
-                        );
+                        )?;
                     } else if self.get_coordinate_system(out).is_none() {
-                        a2.add_failure_at(0, format!("unknown coordinate system '{out}'"));
+                        a2.diagnose_at(
+                            0,
+                            Level::Error,
+                            format_args!("unknown coordinate system '{out}'"),
+                        )?;
                     }
                     a2.with_key(0, |a3| {
-                        check_ndim(a3, "input", ct.input_ndim(), intrinsic_ndim);
-                        check_ndim(a3, "output", ct.output_ndim(), intrinsic_ndim);
-                    });
-                });
+                        check_ndim(a3, "input", ct.input_ndim(), intrinsic_ndim)?;
+                        check_ndim(a3, "output", ct.output_ndim(), intrinsic_ndim)?;
+                        Ok(())
+                    })?;
+                    Ok(())
+                })?;
             }
-        });
+            Ok(())
+        })?;
 
         let cts = &self.coordinate_transformations;
         accum.with_key("coordinateTransformations", |a| {
-            a.validate_iter(cts);
+            a.validate_iter(cts)?;
             for (idx, ct) in cts.iter().enumerate() {
                 a.with_key(idx, |a2| {
                     self.validate_additional_transform(a2, ct, intrinsic)
-                });
+                })?;
             }
-            super::validate_local_transform_graph(a, &self.coordinate_systems, cts);
-        });
+            super::validate_local_transform_graph(a, &self.coordinate_systems, cts)?;
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 
@@ -139,8 +156,8 @@ impl MultiscaleImage {
         accum: &mut Accumulator,
         ct: &CoordinateTransform,
         intrinsic: Option<&str>,
-    ) {
-        require_named_io(accum, ct);
+    ) -> Result<(), DiagnosticError> {
+        require_named_io(accum, ct)?;
         let (input, output) = (&ct.input, &ct.output);
         let is_intrinsic =
             |r: &CoordinateSystemRef| r.path.is_none() && r.name.as_deref() == intrinsic;
@@ -150,8 +167,11 @@ impl MultiscaleImage {
         } else if is_intrinsic(output) {
             input
         } else {
-            accum.add_failure("neither input nor output is the intrinsic coordinate system");
-            return;
+            accum.diagnose(
+                Level::Error,
+                "neither input nor output is the intrinsic coordinate system",
+            )?;
+            return Ok(());
         };
 
         // Name lookup and dimensionality of same-document references
@@ -163,11 +183,13 @@ impl MultiscaleImage {
             )
         {
             // coordinate system in a child labels group
-            accum.add_failure_at(
+            accum.diagnose_at(
                 "type",
+                Level::Error,
                 "transformations to labels must be identity, scale, or translation",
-            );
+            )?;
         }
+        Ok(())
     }
 }
 
@@ -200,44 +222,51 @@ impl MaybeNDim for MultiscaleImageDataset {
 }
 
 impl Validate for MultiscaleImageDataset {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if self.path.is_empty() {
-            accum.add_failure_at("path", "empty");
+            accum.diagnose_at("path", Level::Error, "empty")?;
         }
         accum.with_key("coordinateTransformations", |a| {
             if self.coordinate_transformations.len() != 1 {
-                a.add_failure(format!(
-                    "expected exactly 1 transformation, got {}",
-                    self.coordinate_transformations.len()
-                ));
+                a.diagnose(
+                    Level::Error,
+                    format_args!(
+                        "expected exactly 1 transformation, got {}",
+                        self.coordinate_transformations.len()
+                    ),
+                )?;
             }
-            a.validate_iter(&self.coordinate_transformations);
+            a.validate_iter(&self.coordinate_transformations)?;
             let Some(ct) = self.transform() else {
-                return;
+                return Ok(());
             };
             a.with_key(0, |a2| {
                 match ct.input.path.as_deref() {
                     None => a2.with_keys(&["input".into(), "path".into()], |a3| {
-                        a3.add_failure("missing")
-                    }),
+                        a3.diagnose(Level::Error, "missing")
+                    })?,
                     Some(p) if p != self.path => a2
                         .with_keys(&["input".into(), "path".into()], |a3| {
-                            a3.add_failure("does not match dataset path")
-                        }),
+                            a3.diagnose(Level::Error, "does not match dataset path")
+                        })?,
                     _ => (),
                 }
                 if ct.output.name.is_none() {
                     a2.with_keys(&["output".into(), "name".into()], |a3| {
-                        a3.add_failure("missing")
-                    });
+                        a3.diagnose(Level::Error, "missing")
+                    })?;
                 }
                 if !is_valid_dataset_transform(&ct.transform) {
-                    a2.add_failure(
+                    a2.diagnose(
+                        Level::Error,
                         "must be identity, scale, or a sequence of a scale then a translation",
-                    );
+                    )?;
                 }
-            });
-        });
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 

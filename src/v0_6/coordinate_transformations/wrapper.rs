@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use super::dimension::unique_indices;
 use super::{Transform, TransformType};
@@ -16,23 +16,26 @@ pub struct Sequence {
 }
 
 impl Validate for Sequence {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         accum.with_key("transformations", |a| {
             if self.transformations.is_empty() {
-                a.add_failure("empty");
+                a.diagnose(Level::Error, "empty")?;
             }
-            a.validate_iter(&self.transformations);
+            a.validate_iter(&self.transformations)?;
             for (idx, pair) in self.transformations.windows(2).enumerate() {
                 if let (Some(o), Some(i)) = (pair[0].output_ndim(), pair[1].input_ndim())
                     && o != i
                 {
-                    a.add_failure_at(
+                    a.diagnose_at(
                         idx + 1,
-                        format!("input dimensionality {i} does not match previous output {o}"),
-                    );
+                        Level::Error,
+                        format_args!("input dimensionality {i} does not match previous output {o}"),
+                    )?;
                 }
             }
-        });
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 
@@ -63,29 +66,32 @@ fn opts_compatible(a: Option<usize>, b: Option<usize>) -> bool {
 }
 
 impl Validate for Bijection {
-    fn validate_inner(&self, accum: &mut Accumulator) {
-        accum.validate_member_at("forward", self.forward.as_ref());
-        accum.validate_member_at("inverse", self.inverse.as_ref());
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_member_at("forward", self.forward.as_ref())?;
+        accum.validate_member_at("inverse", self.inverse.as_ref())?;
         if !opts_compatible(self.forward.output_ndim(), self.inverse.input_ndim()) {
-            accum.add_failure_at(
+            accum.diagnose_at(
                 "forward",
-                format!(
+                Level::Error,
+                format_args!(
                     "output dimensionality {} does not match inverse input dimensionality {}",
                     self.forward.output_ndim().unwrap_or_default(),
                     self.inverse.input_ndim().unwrap_or_default()
                 ),
-            );
+            )?;
         }
         if !opts_compatible(self.inverse.output_ndim(), self.forward.input_ndim()) {
-            accum.add_failure_at(
+            accum.diagnose_at(
                 "inverse",
-                format!(
+                Level::Error,
+                format_args!(
                     "output dimensionality {} does not match forward input dimensionality {}",
                     self.inverse.output_ndim().unwrap_or_default(),
                     self.forward.input_ndim().unwrap_or_default()
                 ),
-            );
+            )?;
         }
+        Ok(())
     }
 }
 
@@ -107,28 +113,33 @@ pub struct ByDimension {
 }
 
 impl Validate for ByDimension {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         accum.with_key("transformations", |a| {
             if self.transformations.is_empty() {
-                a.add_failure("empty");
+                a.diagnose(Level::Error, "empty")?;
             }
-            a.validate_iter(&self.transformations);
+            a.validate_iter(&self.transformations)?;
             let mut outputs = BTreeSet::default();
             for (idx, t) in self.transformations.iter().enumerate() {
                 for o in t.output_axes.iter() {
                     if !outputs.insert(*o) {
                         a.with_keys(&[idx.into(), "outputAxes".into()], |a2| {
-                            a2.add_failure(format!("output axis {o} already produced"))
-                        });
+                            a2.diagnose(
+                                Level::Error,
+                                format_args!("output axis {o} already produced"),
+                            )
+                        })?;
                     }
                 }
             }
             if let Some(max) = outputs.last()
                 && *max + 1 != outputs.len()
             {
-                a.add_failure("output axes are not contiguous from 0");
+                a.diagnose(Level::Error, "output axes are not contiguous from 0")?;
             }
-        });
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 
@@ -163,25 +174,28 @@ pub struct ByDimensionItem {
 }
 
 impl Validate for ByDimensionItem {
-    fn validate_inner(&self, accum: &mut Accumulator) {
-        accum.validate_member_at("transformation", &self.transformation);
-        unique_indices(accum, "inputAxes", &self.input_axes);
-        unique_indices(accum, "outputAxes", &self.output_axes);
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_member_at("transformation", &self.transformation)?;
+        unique_indices(accum, "inputAxes", &self.input_axes)?;
+        unique_indices(accum, "outputAxes", &self.output_axes)?;
         if let Some(n) = self.transformation.input_ndim()
             && n != self.input_axes.len()
         {
-            accum.add_failure_at(
+            accum.diagnose_at(
                 "inputAxes",
-                format!("length does not match transformation input dimensionality {n}"),
-            );
+                Level::Error,
+                format_args!("length does not match transformation input dimensionality {n}"),
+            )?;
         }
         if let Some(n) = self.transformation.output_ndim()
             && n != self.output_axes.len()
         {
-            accum.add_failure_at(
+            accum.diagnose_at(
                 "outputAxes",
-                format!("length does not match transformation output dimensionality {n}"),
-            );
+                Level::Error,
+                format_args!("length does not match transformation output dimensionality {n}"),
+            )?;
         }
+        Ok(())
     }
 }

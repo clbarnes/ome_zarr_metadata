@@ -2,7 +2,7 @@
 use super::next;
 use super::{v0_4, v0_5, v0_6};
 use serde::Deserialize;
-use validatrix::Validate;
+use validatrix::{DiagnosticError, Validate};
 
 /// OME-Zarr metadata in any supported version.
 #[derive(Debug, Deserialize, Clone)]
@@ -33,7 +33,7 @@ impl AnyOmeFields {
 }
 
 impl Validate for AnyOmeFields {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
         match self {
             AnyOmeFields::V0_4(attrs) => attrs.validate_inner(accum),
             AnyOmeFields::V0_5(fields) => accum.validate_member_at("ome", fields),

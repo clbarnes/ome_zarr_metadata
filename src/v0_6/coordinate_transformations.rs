@@ -3,7 +3,7 @@
 //! <https://ngff.openmicroscopy.org/specifications/0.6/#trafo-md>.
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use crate::Error;
 use crate::v0_5 as prev;
@@ -120,10 +120,11 @@ pub enum CoordinateSystemRefKind<'a> {
 }
 
 impl Validate for CoordinateSystemRef {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if self.name.is_none() && self.path.is_none() {
-            accum.add_failure("reference has neither name nor path");
+            accum.diagnose(Level::Error, "reference has neither name nor path")?;
         }
+        Ok(())
     }
 }
 
@@ -169,20 +170,27 @@ impl CoordinateTransform {
 }
 
 impl Validate for CoordinateTransform {
-    fn validate_inner(&self, accum: &mut Accumulator) {
-        accum.validate_member_at("input", &self.input);
-        accum.validate_member_at("output", &self.output);
-        self.transform.validate_inner(accum);
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_member_at("input", &self.input)?;
+        accum.validate_member_at("output", &self.output)?;
+        self.transform.validate_inner(accum)?;
+        Ok(())
     }
 }
 
 /// Validate that a transformation's `input` and `output` both have `name`s.
-pub(crate) fn require_named_io(accum: &mut Accumulator, ct: &CoordinateTransform) {
+pub(crate) fn require_named_io(
+    accum: &mut Accumulator,
+    ct: &CoordinateTransform,
+) -> Result<(), DiagnosticError> {
     for (key, r) in [("input", &ct.input), ("output", &ct.output)] {
         if r.name.is_none() {
-            accum.with_keys(&[key.into(), "name".into()], |a| a.add_failure("missing"))
+            accum.with_keys(&[key.into(), "name".into()], |a| {
+                a.diagnose(Level::Error, "missing")
+            })?;
         }
     }
+    Ok(())
 }
 
 /// Validate references from transformations to coordinate systems defined in the same document.
@@ -201,31 +209,37 @@ pub(crate) fn validate_local_transform_graph(
     accum: &mut Accumulator,
     systems: &[super::CoordinateSystem],
     transforms: &[CoordinateTransform],
-) {
+) -> Result<(), DiagnosticError> {
     use crate::NDim;
 
     // TODO: validate graph connectedness
 
     for (idx, ct) in transforms.iter().enumerate() {
         let mut resolve = |terminal_key: &'static str, system_ref: &CoordinateSystemRef| {
-            let name = system_ref.as_local()?;
+            let Some(name) = system_ref.as_local() else {
+                return Ok(None);
+            };
             let cs = systems.iter().find(|cs| cs.name == name);
             if cs.is_none() {
                 accum.with_keys(&[idx.into(), terminal_key.into(), "name".into()], |a| {
-                    a.add_failure(format!("unknown coordinate system '{name}'"))
-                });
+                    a.diagnose(
+                        Level::Error,
+                        format_args!("unknown coordinate system '{name}'"),
+                    )
+                })?;
             }
-            cs
+            Ok::<_, DiagnosticError>(cs)
         };
-        let input_cs = resolve("input", &ct.input);
-        let output_cs = resolve("output", &ct.output);
+        let input_cs = resolve("input", &ct.input)?;
+        let output_cs = resolve("output", &ct.output)?;
 
         match (input_cs, output_cs) {
             (Some(i), Some(o)) => {
                 if ct.transform.check_ndim(i.ndim(), o.ndim()) == Some(false) {
-                    accum.add_failure_at(
+                    accum.diagnose_at(
                         idx,
-                        format!(
+                        Level::Error,
+                        format_args!(
                             "transformation is not compatible with input coordinate system \
                              '{}' ({}D) and output coordinate system '{}' ({}D)",
                             i.name,
@@ -233,18 +247,19 @@ pub(crate) fn validate_local_transform_graph(
                             o.name,
                             o.ndim()
                         ),
-                    );
+                    )?;
                 }
             }
             (Some(cs), None) => {
-                check_one_side(accum, idx, "input", ct.input_ndim(), cs);
+                check_one_side(accum, idx, "input", ct.input_ndim(), cs)?;
             }
             (None, Some(cs)) => {
-                check_one_side(accum, idx, "output", ct.output_ndim(), cs);
+                check_one_side(accum, idx, "output", ct.output_ndim(), cs)?;
             }
             (None, None) => (),
         }
     }
+    Ok(())
 }
 
 /// Compare a transformation's dimensionality on one side with that of a coordinate system.
@@ -254,22 +269,26 @@ fn check_one_side(
     terminal_key: &'static str,
     transform_ndim: Option<usize>,
     cs: &super::CoordinateSystem,
-) {
+) -> Result<(), DiagnosticError> {
     use crate::NDim;
 
     let Some(n) = transform_ndim else {
-        return;
+        return Ok(());
     };
     let expected = cs.ndim();
     if n != expected {
         accum.with_keys(&[idx.into(), terminal_key.into()], |a| {
-            a.add_failure(format!(
-                "transformation {terminal_key} dimensionality {n} does not match \
+            a.diagnose(
+                Level::Error,
+                format_args!(
+                    "transformation {terminal_key} dimensionality {n} does not match \
                  coordinate system '{}' dimensionality {expected}",
-                cs.name
-            ))
-        });
+                    cs.name
+                ),
+            )
+        })?;
     }
+    Ok(())
 }
 
 /// Type-specific parameters of a coordinate transformation, discriminated by the `type` field.
@@ -382,8 +401,8 @@ impl TransformType for Transform {
 }
 
 impl Validate for Transform {
-    fn validate_inner(&self, accum: &mut Accumulator) {
-        dispatch_transform_type!(self, t => Validate::validate_inner(t, accum));
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        dispatch_transform_type!(self, t => Validate::validate_inner(t, accum))
     }
 }
 
