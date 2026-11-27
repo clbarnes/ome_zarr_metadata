@@ -40,7 +40,7 @@ pub use errors::{Error, Result};
 mod ndim;
 pub use ndim::{MaybeNDim, NDim};
 
-pub use validatrix::{Valid, Validate};
+pub use validatrix::{self, DiagnosticError, Level, Policy, Valid, Validate, Validator};
 
 mod any;
 pub use any::AnyOmeFields;
