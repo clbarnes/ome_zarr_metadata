@@ -3,7 +3,7 @@
 //! <https://ngff.openmicroscopy.org/0.5/#multiscale-md>.
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Validate};
 
 use crate::{MaybeNDim, NDim};
 
@@ -34,18 +34,21 @@ pub struct MultiscaleImage {
 }
 
 impl Validate for MultiscaleImage {
-    fn validate_inner(&self, accum: &mut Accumulator) {
-        accum.with_key("axes", |a| valid_axes(a, &self.axes));
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        accum.with_key("axes", |a| valid_axes(a, &self.axes))?;
 
         accum.with_key("datasets", |a| {
-            valid_datasets(a, self.maybe_ndim(), &self.datasets);
-        });
+            valid_datasets(a, self.maybe_ndim(), &self.datasets)?;
+            Ok(())
+        })?;
 
         if let Some(ct) = self.coordinate_transformations.as_ref() {
             accum.with_key("coordinateTransformations", |a| {
-                valid_transforms(a, self.maybe_ndim(), ct);
-            });
+                valid_transforms(a, self.maybe_ndim(), ct)?;
+                Ok(())
+            })?;
         }
+        Ok(())
     }
 }
 

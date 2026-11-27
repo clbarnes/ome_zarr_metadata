@@ -1,7 +1,7 @@
 use std::{fmt::Display, str::FromStr};
 
 use serde::{Deserialize, Serialize};
-use validatrix::Validate;
+use validatrix::{DiagnosticError, Level, Validate};
 
 /// Transitional information specific to the channels of an image and how to render it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,8 +14,9 @@ pub struct Omero {
 }
 
 impl Validate for Omero {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
-        accum.validate_iter_at("channels", &self.channels);
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_iter_at("channels", &self.channels)?;
+        Ok(())
     }
 }
 
@@ -32,8 +33,9 @@ pub struct Channel {
 }
 
 impl Validate for Channel {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
-        accum.validate_member_at("window", &self.window);
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_member_at("window", &self.window)?;
+        Ok(())
     }
 }
 
@@ -107,12 +109,13 @@ pub struct Window {
 }
 
 impl Validate for Window {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
         if self.max < self.min {
-            accum.add_failure_at("max", "less than min");
+            accum.diagnose_at("max", Level::Error, "less than min")?;
         }
         if self.end < self.start {
-            accum.add_failure_at("end", "before start");
+            accum.diagnose_at("end", Level::Error, "before start")?;
         }
+        Ok(())
     }
 }

@@ -3,7 +3,7 @@
 //! <https://ngff.openmicroscopy.org/specifications/0.6/#scene-md>.
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use crate::v0_6::validate_local_transform_graph;
 
@@ -30,35 +30,41 @@ impl Scene {
 }
 
 impl Validate for Scene {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         accum.with_key("coordinateSystems", |a| {
             validate_coordinate_systems(a, &self.coordinate_systems)
-        });
+        })?;
         accum.with_key("coordinateTransformations", |a| {
             if self.coordinate_transformations.is_empty() {
-                a.add_failure("empty");
+                a.diagnose(Level::Error, "empty")?;
             }
-            a.validate_iter(&self.coordinate_transformations);
+            a.validate_iter(&self.coordinate_transformations)?;
             for (idx, ct) in self.coordinate_transformations.iter().enumerate() {
                 a.with_key(idx, |a2| {
-                    require_named_io(a2, ct);
+                    require_named_io(a2, ct)?;
                     for (key, r) in [("input", &ct.input), ("output", &ct.output)] {
                         // without a path, the name refers to a system in this scene
                         if let (None, Some(name)) = (r.path.as_ref(), r.name.as_deref())
                             && self.get_coordinate_system(name).is_none()
                         {
                             a2.with_keys(&[key.into(), "name".into()], |a3| {
-                                a3.add_failure(format!("unknown scene coordinate system '{name}'"))
-                            });
+                                a3.diagnose(
+                                    Level::Error,
+                                    format_args!("unknown scene coordinate system '{name}'"),
+                                )
+                            })?;
                         }
                     }
-                });
+                    Ok(())
+                })?;
             }
             validate_local_transform_graph(
                 a,
                 &self.coordinate_systems,
                 &self.coordinate_transformations,
-            );
-        });
+            )?;
+            Ok(())
+        })?;
+        Ok(())
     }
 }

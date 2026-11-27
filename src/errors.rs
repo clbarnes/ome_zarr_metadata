@@ -11,7 +11,7 @@ pub enum Error {
     SerdeJson(#[from] serde_json::Error),
     /// Data fails validation.
     #[error(transparent)]
-    Validation(#[from] validatrix::Error),
+    Validation(#[from] validatrix::DiagnosticError),
     /// Invalid OMERO color.
     #[error("invalid hex RGB color")]
     InvalidColor,

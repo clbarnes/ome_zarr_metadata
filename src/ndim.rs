@@ -1,4 +1,4 @@
-use validatrix::Accumulator;
+use validatrix::{Accumulator, DiagnosticError, Level};
 
 /// Trait for a type which has some dimensionality which can always be determined by its metadata.
 pub trait NDim {
@@ -32,7 +32,7 @@ pub(crate) fn validate_ndims<'a, T: MaybeNDim + 'a>(
     accum: &mut Accumulator,
     expected: Option<usize>,
     dimensionals: impl IntoIterator<Item = &'a T> + 'a,
-) {
+) -> Result<(), DiagnosticError> {
     // iterator of idx, ndims
     let mut it = dimensionals
         .into_iter()
@@ -44,16 +44,18 @@ pub(crate) fn validate_ndims<'a, T: MaybeNDim + 'a>(
             if let Some((_idx, n)) = it.next() {
                 n
             } else {
-                return;
+                return Ok(());
             }
         }
     };
     for (idx, n) in it {
         if n != exp {
-            accum.add_failure_at(
+            accum.diagnose_at(
                 idx,
-                format!("inconsistent dimensionality: got {n}D, expected {exp}D"),
-            );
+                Level::Error,
+                format_args!("inconsistent dimensionality: got {n}D, expected {exp}D"),
+            )?;
         }
     }
+    Ok(())
 }

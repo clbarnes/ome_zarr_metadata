@@ -17,7 +17,7 @@ pub use multiscales::*;
 pub use plate::*;
 use serde::Deserialize;
 use serde::Serialize;
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 pub use well::*;
 
 use serde::de::Error;
@@ -53,37 +53,40 @@ pub struct OmeFields {
 }
 
 impl Validate for OmeFields {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if let Some(m) = self.multiscales.as_ref() {
             accum.with_key("multiscales", |a| {
                 if m.is_empty() {
-                    a.add_failure("empty multiscales");
+                    a.diagnose(Level::Error, "empty multiscales")?;
                 }
-                a.validate_iter(m);
-            });
+                a.validate_iter(m)?;
+                Ok(())
+            })?;
         }
 
         if let Some(i) = self.image_label.as_ref() {
-            accum.validate_member_at("image-label", i);
+            accum.validate_member_at("image-label", i)?;
             if self.multiscales.is_none() {
-                accum.add_failure_at(
+                accum.diagnose_at(
                     "multiscales",
+                    Level::Error,
                     "image-label is present but multiscales is missing",
-                );
+                )?;
             }
         }
 
         if let Some(p) = self.plate.as_ref() {
-            accum.validate_member_at("plate", p);
+            accum.validate_member_at("plate", p)?;
         }
 
         if let Some(w) = self.well.as_ref() {
-            accum.validate_member_at("well", w);
+            accum.validate_member_at("well", w)?;
         }
 
         if let Some(o) = self.omero.as_ref() {
-            accum.validate_member_at("omero", o);
+            accum.validate_member_at("omero", o)?;
         }
+        Ok(())
     }
 }
 
@@ -97,8 +100,9 @@ pub struct OmeZarrGroupAttributes {
 }
 
 impl Validate for OmeZarrGroupAttributes {
-    fn validate_inner(&self, accum: &mut Accumulator) {
-        accum.validate_member_at("ome", &self.ome);
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_member_at("ome", &self.ome)?;
+        Ok(())
     }
 }
 
@@ -136,8 +140,9 @@ pub struct OmeZarrGroupMetadata {
 }
 
 impl Validate for OmeZarrGroupMetadata {
-    fn validate_inner(&self, accum: &mut Accumulator) {
-        accum.validate_member_at("attributes", &self.attributes);
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
+        accum.validate_member_at("attributes", &self.attributes)?;
+        Ok(())
     }
 }
 

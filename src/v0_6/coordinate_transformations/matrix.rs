@@ -1,7 +1,7 @@
 //! Matrix transformations: affine and rotation.
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use crate::linalg::Matrix;
 
@@ -24,15 +24,16 @@ pub enum Affine {
 }
 
 impl Validate for Affine {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         match self {
             Affine::Inline { .. } => (),
             Affine::Path { path } => {
                 if path.is_empty() {
-                    accum.add_failure_at("path", "empty");
+                    accum.diagnose_at("path", Level::Error, "empty")?;
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -69,7 +70,7 @@ pub enum Rotation {
 }
 
 impl Validate for Rotation {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         match self {
             Rotation::Inline { rotation } => accum.with_key("rotation", |a| {
                 if rotation.is_orthogonal(1e-6) {
@@ -77,18 +78,23 @@ impl Validate for Rotation {
                         .determinant()
                         .expect("orthogonal matrix must be square");
                     if (det - 1.0).abs() > 1e-6 {
-                        a.add_failure(format!("matrix determinant must be 1; got {det}"));
+                        a.diagnose(
+                            Level::Error,
+                            format_args!("matrix determinant must be 1; got {det}"),
+                        )?;
                     }
                 } else {
-                    a.add_failure("matrix is not orthogonal");
+                    a.diagnose(Level::Error, "matrix is not orthogonal")?;
                 }
-            }),
+                Ok(())
+            })?,
             Rotation::Path { path } => {
                 if path.is_empty() {
-                    accum.add_failure_at("path", "empty");
+                    accum.diagnose_at("path", Level::Error, "empty")?;
                 }
             }
         }
+        Ok(())
     }
 }
 

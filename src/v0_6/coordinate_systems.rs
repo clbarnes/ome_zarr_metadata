@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use crate::NDim;
 pub use crate::v0_5::{AxisUnit, AxisUnitSpace, AxisUnitTime};
@@ -83,17 +83,17 @@ impl Axis {
 }
 
 impl Validate for Axis {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if self.name.is_empty() {
-            accum.add_failure_at("name", "empty axis name");
+            accum.diagnose_at("name", Level::Error, "empty axis name")?;
         }
         if self.discrete == Some(false)
             && self.r#type.as_ref().is_some_and(|t| t.must_be_discrete())
         {
-            accum.add_failure_at("discrete", "array axes are discrete");
+            accum.diagnose_at("discrete", Level::Error, "array axes are discrete")?;
         }
         let (Some(t), Some(u)) = (&self.r#type, &self.unit) else {
-            return;
+            return Ok(());
         };
         match u {
             AxisUnit::Space(u) if t != &AxisType::Space => {
@@ -110,6 +110,7 @@ impl Validate for Axis {
             }
             _ => (),
         }
+        Ok(())
     }
 }
 
@@ -142,18 +143,20 @@ impl NDim for CoordinateSystem {
 }
 
 impl Validate for CoordinateSystem {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if self.name.is_empty() {
-            accum.add_failure_at("name", "empty coordinate system name");
+            accum.diagnose_at("name", Level::Error, "empty coordinate system name")?;
         }
         accum.with_key("axes", |a| {
-            valid_axes(a, &self.axes);
+            valid_axes(a, &self.axes)?;
 
             if self.axes.is_empty() {
-                a.add_failure("no axes");
+                a.diagnose(Level::Error, "no axes")?;
             }
-            a.validate_iter(&self.axes);
-        });
+            a.validate_iter(&self.axes)?;
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 
@@ -162,9 +165,12 @@ impl Validate for CoordinateSystem {
 /// - each axis is internally valid
 /// - axis names are unique
 /// - axes are in order ?time, ?, ?space, space, space
-pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) {
+pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) -> Result<(), DiagnosticError> {
     if axes.len() < 2 || axes.len() > 5 {
-        accum.add_failure(format!("got {} axes, expected 2-5", axes.len()));
+        accum.diagnose(
+            Level::Error,
+            format_args!("got {} axes, expected 2-5", axes.len()),
+        )?;
     }
 
     let mut done_time = false;
@@ -174,26 +180,31 @@ pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) {
 
     for (idx, ax) in axes.iter().enumerate() {
         accum.with_key(idx, |a| {
-            ax.validate_inner(a);
+            ax.validate_inner(a)?;
             if !names.insert(ax.name.as_str()) {
-                a.add_failure(format!("duplicate axis name '{}'", ax.name));
+                a.diagnose(
+                    Level::Error,
+                    format_args!("duplicate axis name '{}'", ax.name),
+                )?;
             }
-        });
+            Ok(())
+        })?;
         match ax.r#type {
             Some(AxisType::Space) => {
                 n_space += 1;
                 if n_space > 3 {
-                    accum.add_failure_at(
+                    accum.diagnose_at(
                         idx,
-                        format!("at least {n_space} space axes, should be max 3"),
-                    );
+                        Level::Error,
+                        format_args!("at least {n_space} space axes, should be max 3"),
+                    )?;
                 }
                 done_time = true;
                 done_channel_custom = true;
             }
             Some(AxisType::Time) => {
                 if done_time || done_channel_custom || n_space > 0 {
-                    accum.add_failure_at(idx, "unexpected time axis");
+                    accum.diagnose_at(idx, Level::Error, "unexpected time axis")?;
                 }
                 done_time = true;
             }
@@ -204,7 +215,11 @@ pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) {
             | Some(AxisType::Array)
             | Some(AxisType::Custom(_)) => {
                 if done_channel_custom || n_space > 0 {
-                    accum.add_failure_at(idx, "unexpected channel/custom/unknown axis");
+                    accum.diagnose_at(
+                        idx,
+                        Level::Error,
+                        "unexpected channel/custom/unknown axis",
+                    )?;
                 }
                 done_channel_custom = true;
                 done_time = true;
@@ -212,21 +227,32 @@ pub(crate) fn valid_axes(accum: &mut Accumulator, axes: &[Axis]) {
         }
     }
     if n_space < 2 {
-        accum.add_failure(format!("got {n_space} space axes, expected 2-3"));
+        accum.diagnose(
+            Level::Error,
+            format_args!("got {n_space} space axes, expected 2-3"),
+        )?;
     }
+    Ok(())
 }
 
 /// Validate a list of coordinate systems, including uniqueness of names.
-pub(crate) fn validate_coordinate_systems(accum: &mut Accumulator, systems: &[CoordinateSystem]) {
-    accum.validate_iter(systems);
+pub(crate) fn validate_coordinate_systems(
+    accum: &mut Accumulator,
+    systems: &[CoordinateSystem],
+) -> Result<(), DiagnosticError> {
+    accum.validate_iter(systems)?;
     let mut names = BTreeSet::default();
     for (idx, cs) in systems.iter().enumerate() {
         if !names.insert(cs.name.as_str()) {
             accum.with_keys(&[idx.into(), "name".into()], |a| {
-                a.add_failure(format!("duplicate coordinate system name '{}'", cs.name))
-            });
+                a.diagnose(
+                    Level::Error,
+                    format_args!("duplicate coordinate system name '{}'", cs.name),
+                )
+            })?;
         }
     }
+    Ok(())
 }
 
 /// Find a coordinate system by name.

@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use crate::MaybeNDim;
 
@@ -24,10 +24,11 @@ pub enum CoordinateTransform {
 }
 
 impl Validate for CoordinateTransform {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if let CoordinateTransform::Identity = self {
-            accum.add_failure("identity transform cannot be used here");
+            accum.diagnose(Level::Error, "identity transform cannot be used here")?;
         }
+        Ok(())
     }
 }
 

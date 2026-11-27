@@ -5,7 +5,7 @@
 use std::{collections::HashSet, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 /// `labels` metadata. A JSON array of paths to the labeled multiscale image(s).
 pub type Labels = Vec<String>;
@@ -28,24 +28,26 @@ pub struct ImageLabel {
 }
 
 impl Validate for ImageLabel {
-    fn validate_inner(&self, accum: &mut validatrix::Accumulator) {
+    fn validate_inner(&self, accum: &mut validatrix::Accumulator) -> Result<(), DiagnosticError> {
         if let Some(c) = self.colors.as_ref() {
             accum.with_key("colors", |a| {
                 if c.is_empty() {
-                    a.add_failure("empty");
+                    a.diagnose(Level::Error, "empty")?;
                 }
                 validate_unique_labels(a, c.iter())
-            });
+            })?;
         }
 
         if let Some(p) = self.properties.as_ref() {
             accum.with_key("properties", |a| {
                 if p.is_empty() {
-                    a.add_failure("empty");
+                    a.diagnose(Level::Error, "empty")?;
                 }
-                validate_unique_labels(a, p.iter());
-            });
+                validate_unique_labels(a, p.iter())?;
+                Ok(())
+            })?;
         }
+        Ok(())
     }
 }
 
@@ -63,13 +65,14 @@ pub struct ImageLabelColor {
 pub(crate) fn validate_unique_labels<'a, T: HasLabelValue + 'a>(
     accum: &mut Accumulator,
     it: impl IntoIterator<Item = &'a T>,
-) {
+) -> Result<(), DiagnosticError> {
     let mut set: HashSet<u64> = HashSet::default();
     for (idx, lbl) in it.into_iter().map(HasLabelValue::get_label).enumerate() {
         if !set.insert(lbl) {
-            accum.add_failure_at(idx, format!("repeated label {lbl}"));
+            accum.diagnose_at(idx, Level::Error, format_args!("repeated label {lbl}"))?;
         }
     }
+    Ok(())
 }
 
 pub(crate) trait HasLabelValue {

@@ -3,24 +3,24 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use validatrix::{Accumulator, Validate};
+use validatrix::{Accumulator, DiagnosticError, Level, Validate};
 
 use super::TransformType;
 
-pub(super) fn unique_indices(
+pub(super) fn unique_indices<'a>(
     accum: &mut Accumulator,
     key: &'static str,
-    indices: &[usize],
-) -> BTreeSet<usize> {
+    indices: impl IntoIterator<Item = &'a usize>,
+) -> Result<BTreeSet<usize>, DiagnosticError> {
     let mut seen = BTreeSet::default();
-    for (idx, i) in indices.iter().enumerate() {
+    for (idx, i) in indices.into_iter().enumerate() {
         if !seen.insert(*i) {
             accum.with_keys(&[key.into(), idx.into()], |a| {
-                a.add_failure(format!("duplicate index {i}"))
-            });
+                a.diagnose(Level::Error, format_args!("duplicate index {i}"))
+            })?;
         }
     }
-    seen
+    Ok(seen)
 }
 
 /// `mapAxis` transformation: an axis permutation.
@@ -32,19 +32,23 @@ pub struct MapAxis {
 }
 
 impl Validate for MapAxis {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         let n = self.map_axis.len();
         if n == 0 {
-            accum.add_failure_at("mapAxis", "empty");
+            accum.diagnose_at("mapAxis", Level::Error, "empty")?;
         }
-        unique_indices(accum, "mapAxis", &self.map_axis);
+        unique_indices(accum, "mapAxis", &self.map_axis)?;
         for (idx, i) in self.map_axis.iter().enumerate() {
             if *i >= n {
                 accum.with_keys(&["mapAxis".into(), idx.into()], |a| {
-                    a.add_failure(format!("index {i} out of range for {n} axes"))
-                });
+                    a.diagnose(
+                        Level::Error,
+                        format_args!("index {i} out of range for {n} axes"),
+                    )
+                })?;
             }
         }
+        Ok(())
     }
 }
 
@@ -67,12 +71,16 @@ pub struct ProjectAxis {
 }
 
 impl Validate for ProjectAxis {
-    fn validate_inner(&self, accum: &mut Accumulator) {
+    fn validate_inner(&self, accum: &mut Accumulator) -> Result<(), DiagnosticError> {
         if self.dropped_inputs.is_empty() && self.created_outputs.is_empty() {
-            accum.add_failure("neither droppedInputs nor createdOutputs given");
+            accum.diagnose(
+                Level::Error,
+                "neither droppedInputs nor createdOutputs given",
+            )?;
         }
-        unique_indices(accum, "droppedInputs", &self.dropped_inputs);
-        unique_indices(accum, "createdOutputs", &self.created_outputs);
+        unique_indices(accum, "droppedInputs", &self.dropped_inputs)?;
+        unique_indices(accum, "createdOutputs", &self.created_outputs)?;
+        Ok(())
     }
 }
 
